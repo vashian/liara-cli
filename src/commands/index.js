@@ -1,7 +1,9 @@
+import db from './db';
 import deploy from './deploy';
 import login from './login';
 
 export default {
-  deploy,
+  db,
   login,
+  deploy,
 };
