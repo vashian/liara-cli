@@ -52,10 +52,9 @@ export default auth(async function deploy(args, config) {
     clearAndLog(`${gray(`${title}:`)} ${value}`);
   }
 
+  let liaraJSON = {};
   const hasLiaraJSONFile = existsSync(liaraJSONPath);
   if (hasLiaraJSONFile) {
-    let liaraJSON;
-
     try {
       liaraJSON = readJSONSync(liaraJSONPath) || {};
     } catch (error) {
@@ -115,6 +114,9 @@ export default auth(async function deploy(args, config) {
   logInfo('Project', projectId);
   logInfo('Deploying', projectPath);
 
+
+  // TODO: If user has used command line args to sepecify the platform
+  // we should use it, otherwise we should use liara.json and finally detecting it.
   if (platform) {
     logInfo('Platform', platform);
 
@@ -186,7 +188,7 @@ export default auth(async function deploy(args, config) {
 
   debug && console.time('[debug] Ensure app has Dockerfile');
   const { filesWithDockerfile, mapHashesToFilesWithDockerfile } =
-    ensureAppHasDockerfile(platform, files, mapHashesToFiles);
+    ensureAppHasDockerfile(platform, liaraJSON[platform], files, mapHashesToFiles);
   debug && console.timeEnd('[debug] Ensure app has Dockerfile');
 
   try {

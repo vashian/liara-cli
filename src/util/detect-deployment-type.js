@@ -5,9 +5,11 @@ import { readJSONSync, existsSync, readdirSync } from 'fs-extra';
 export default function detectDeploymentType(args, projectPath) {
   const packageJsonFilePath = path.join(projectPath, 'package.json');
   const composeJsonFilePath = path.join(projectPath, 'composer.json');
+  const requirementsFilePath = path.join(projectPath, 'requirements.txt');
 
   const hasPackageFile = existsSync(packageJsonFilePath);
   const hasComposerJsonFile = existsSync(composeJsonFilePath);
+  const hasRequirementsFile = existsSync(requirementsFilePath);
   const hasDockerFile = existsSync(path.join(projectPath, 'Dockerfile'));
   const hasWPContent = existsSync(path.join(projectPath, 'wp-content'));
 
@@ -18,13 +20,14 @@ export default function detectDeploymentType(args, projectPath) {
     'angular',
     'laravel',
     'wordpress',
+    'python',
   ];
 
   const specifiedDeploymentTypes =
     Object.keys(args).filter(key => deploymentTypes.find(type => type === key));
 
   if(specifiedDeploymentTypes.length > 1) {
-    throw new Error(`You can not specify multiple deployment types.`);
+    throw new Error(`You can not specify multiple platforms.`);
   }
 
   if(readdirSync(projectPath).length === 0) {
@@ -59,6 +62,13 @@ export default function detectDeploymentType(args, projectPath) {
     return 'wordpress';
   }
 
+  if(args.python) {
+    if( ! hasRequirementsFile) {
+      throw new Error(`${bold('`requirements.txt`')} file doesn't exists.`);
+    }
+    return 'python';
+  }
+
   if(args.docker) {
     if( ! hasDockerFile) {
       throw new Error(`${bold('`Dockerfile`')} file doesn't exists.`);
@@ -72,7 +82,7 @@ export default function detectDeploymentType(args, projectPath) {
 
   if(hasComposerJsonFile && hasDockerFile) {
     throw new Error(`The project contains both of the \`composer.json\` and \`Dockerfile\` files.
-Please specify your deployment type with --laravel or --docker.`);
+Please specify your platform with --laravel or --docker.`);
   }
 
   if(hasComposerJsonFile) {
@@ -86,9 +96,20 @@ Currently, we only support Laravel projects in the PHP ecosystem.\n`);
     return 'laravel';
   }
 
+
+  if(hasRequirementsFile && hasDockerFile) {
+    throw new Error(`The project contains both of the \`requirements.txt\` and \`Dockerfile\` files.
+Please specify your platform with --python or --docker.`);
+  }
+
+  if(hasRequirementsFile) {
+    return 'python';
+  }
+
+
   if(hasPackageFile && hasDockerFile) {
     throw new Error(`The project contains both of the \`package.json\` and \`Dockerfile\` files.
-Please specify your deployment type with --node or --docker.`);
+Please specify your platform with --node or --docker.`);
   }
 
   if(hasPackageFile) {
@@ -103,7 +124,7 @@ Please specify your deployment type with --node or --docker.`);
 
   if(hasWPContent && hasDockerFile) {
     throw new Error(`The project contains a \`Dockerfile\`.
-Please specify your deployment type with --wordpress or --docker.`);
+Please specify your platform with --wordpress or --docker.`);
   }
 
   if(hasWPContent) {

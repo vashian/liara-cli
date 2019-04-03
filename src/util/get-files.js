@@ -13,7 +13,11 @@ const defaultIgnores = [
   '.liaraignore',
   '*.*~',
   'node_modules',
-  'bower_components'
+  'bower_components',
+  'venv', // Is this right?!,
+
+  '*.pyc',
+  '__pycache__',
 ];
 
 const filterFiles = () => through2.obj(function (item, enc, next) {
