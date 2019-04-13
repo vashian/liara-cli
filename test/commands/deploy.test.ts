@@ -1,17 +1,17 @@
-import {expect, test} from '@oclif/test'
+import * as sinon from 'sinon'
+import {expect} from '@oclif/test'
+import * as inquirer from 'inquirer'
+
+import run from '../utils/run'
+import fixture from '../utils/fixture'
 
 describe('deploy', () => {
-  test
-    .stdout()
-    .command(['deploy'])
-    .it('runs hello', ctx => {
-      expect(ctx.stdout).to.contain('hello world')
-    })
+  beforeEach(function () {
+    sinon.replace(inquirer, 'prompt' as any, sinon.fake())
+  })
 
-  test
-    .stdout()
-    .command(['deploy', '--name', 'jeff'])
-    .it('runs hello --name jeff', ctx => {
-      expect(ctx.stdout).to.contain('hello jeff')
-    })
+  it('should throw an error for invalid liara.json file', async () => {
+    let { stderr } = await run(['deploy', '--path', fixture('invalid-liara-json')])
+    expect(stderr).to.contain('Syntax error')
+  })
 })
