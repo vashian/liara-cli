@@ -16,9 +16,28 @@ describe('utils', () => {
     expect(validatePort(80)).to.be.eq(true)
   })
 
-  it('should get files', async () => {
-    // await getFiles(fixture('simple-gitignore'))
-    // await getFiles(fixture('nested-ignore-files'))
-    await getFiles(fixture('different-ignore-files'))
+  it('should respect .gitignore', async () => {
+    const {files} = await getFiles(fixture('simple-gitignore'))
+    expect(files).to.have.length(1)
+  })
+
+  it('should respect nested ignore files', async () => {
+    const {files} = await getFiles(fixture('nested-ignore-files'))
+    expect(files).to.have.length(2)
+  })
+
+  it('should respect ignore files\' priority', async () => {
+    const {files} = await getFiles(fixture('ignore-files-priority'))
+    expect(files).to.have.length(2)
+  })
+
+  it('should ignore default ignore patterns', async () => {
+    const {files} = await getFiles(fixture('default-ignores'))
+    expect(files).to.have.length(1)
+  })
+
+  it('should override default ignore patterns', async () => {
+    const {files} = await getFiles(fixture('override-default-ignores'))
+    expect(files).to.have.length(2)
   })
 })

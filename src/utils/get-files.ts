@@ -3,15 +3,11 @@ import ignore from 'ignore'
 import * as klaw from 'klaw'
 import * as fs from 'fs-extra'
 import * as through2 from 'through2'
-import {resolve, relative, join, basename, dirname} from 'path'
+import {DebugLogger} from './output'
+import {resolve, relative, join, dirname} from 'path'
 
-interface IFile {
-  checksum: string,
-  path: string,
-  size: number,
-  mode: number,
-}
-
+const mode755 = 16893
+const mode644 = 33204
 const defaultIgnores: string[] = [
   '.git',
   '.idea',
@@ -24,30 +20,65 @@ const defaultIgnores: string[] = [
   'bower_components',
 ]
 
-const removeEmptyLines = (lines: string[]) => lines.filter(line => line.trim().length > 0)
+interface IKlawItem {
+  path: string,
+  stats: fs.Stats,
+}
+
+interface IMapItem {
+  data: Buffer,
+  files: IFile[],
+}
+
+interface IFile {
+  checksum: string,
+  path: string,
+  size: number,
+  mode: number,
+}
+
+interface IDirectory {
+  path: string,
+  mode: number,
+}
+
+function trimLines(lines: string[]): string[] {
+  return lines.reduce((prev, line) => {
+    if (!line.trim() || line.startsWith('#')) {
+      return prev
+    }
+    return [...prev, line]
+  }, [] as string[])
+}
+
+const loadIgnoreFile = (ignoreInstance: any, ignoreFilePath: string, projectPath: string) => {
+  const patterns: string[] = trimLines(
+    fs.readFileSync(ignoreFilePath).toString().split('\n')
+  )
+
+  const relativeToProjectPath = patterns.map((pattern: string) => {
+    const dir = dirname(ignoreFilePath)
+    if (pattern.startsWith('!')) {
+      return '!' + relative(projectPath, join(dir, pattern.substr(1)))
+    }
+    return relative(projectPath, join(dir, pattern))
+  })
+
+  ignoreInstance.add(relativeToProjectPath)
+}
 
 function addIgnorePatterns(ignoreInstance: any, projectPath: string) {
-  const loadIgnoreFile = (ignoreFilePath: string) => {
-    const patterns = removeEmptyLines(
-      fs.readFileSync(ignoreFilePath).toString().split('\n')
-    )
-
-    const relativeToProjectPath = patterns.map((pattern: any) => relative(projectPath, join(dirname(ignoreFilePath), pattern)))
-
-    ignoreInstance.add(relativeToProjectPath)
-  }
-
   return through2.obj(function (item, _, next) {
     const liaraignorePath = join(dirname(item.path), '.liaraignore')
     const dockerignorePath = join(dirname(item.path), '.dockerignore')
     const gitignorePath = join(dirname(item.path), '.gitignore')
 
     if (fs.existsSync(liaraignorePath)) {
-      loadIgnoreFile(liaraignorePath)
+      loadIgnoreFile(ignoreInstance, liaraignorePath, projectPath)
     } else if (fs.existsSync(dockerignorePath)) {
-      loadIgnoreFile(dockerignorePath)
+      loadIgnoreFile(ignoreInstance, dockerignorePath, projectPath)
     } else if (fs.existsSync(gitignorePath)) {
-      loadIgnoreFile(gitignorePath)
+      loadIgnoreFile(ignoreInstance, gitignorePath, projectPath)
     }
 
     this.push(item)
@@ -55,7 +86,7 @@ function addIgnorePatterns(ignoreInstance: any, projectPath: string) {
   })
 }
 
-function ignoreFiles(ignoreInstance: any, projectPath: string) {
+function ignoreFiles(ignoreInstance: any, projectPath: string, debug: DebugLogger) {
   return through2.obj(function (item, _, next) {
     const itemPath = relative(projectPath, item.path)
 
@@ -63,7 +94,7 @@ function ignoreFiles(ignoreInstance: any, projectPath: string) {
       if (!ignoreInstance.ignores(itemPath)) {
         this.push(item)
       } else {
-        console.log('ignoring', item.path.replace(resolve(projectPath) + '/', ''))
+        debug(`ignoring ${item.path.replace(resolve(projectPath) + '/', '')}`)
       }
     }
 
@@ -71,36 +102,83 @@ function ignoreFiles(ignoreInstance: any, projectPath: string) {
   })
 }
 
-export default async function getFiles(projectPath: string) {
-  const mapHashesToFiles = new Map()
-  const directories = []
+async function getFileMode(path: string): Promise<number> {
+  try {
+    // Is executable?
+    await fs.access(path, fs.constants.X_OK)
+    return mode755
+
+  } catch {
+    // File is not executable.
+    return mode644
+  }
+}
+
+export default async function getFiles(projectPath: string, debug: DebugLogger = () => {}) {
+  const mapHashesToFiles = new Map<string, IMapItem>()
+  const directories: IDirectory[] = []
 
   const ignoreInstance = ignore()
+  ignoreInstance.add(defaultIgnores)
 
   await new Promise(resolve => {
-    let files: IFile[] = []
-    let tmpFiles: object[] = []
+    let tmpFiles: IKlawItem[] = []
 
     klaw(projectPath)
       .pipe(addIgnorePatterns(ignoreInstance, projectPath))
-      .pipe(ignoreFiles(ignoreInstance, projectPath))
-      .on('data', file => tmpFiles.push(file))
-      .on('end', () => {
-        console.log(tmpFiles.map((file: any) => file.path))
+      .pipe(ignoreFiles(ignoreInstance, projectPath, debug))
+      .on('data', (file: IKlawItem) => tmpFiles.push(file))
+      .on('end', async () => {
+        await Promise.all(tmpFiles.map(async ({path , stats}) => {
+          const filePath = relative(projectPath, path)
+
+          if (!stats.isFile()) {
+            const dir: IDirectory = {
+              mode: mode755,
+              path: filePath,
+            }
+
+            return directories.push(dir)
+          }
+
+          const data = await fs.readFile(path)
+          const checksum = hash(data)
+          const file: IFile = {
+            checksum,
+            path: filePath,
+            size: stats.size,
+            mode: await getFileMode(filePath),
+          }
+
+          if (mapHashesToFiles.has(checksum)) {
+            const item = mapHashesToFiles.get(checksum)
+            if (!item) return
+            mapHashesToFiles.set(checksum, {
+              data,
+              files: [...item.files, file],
+            })
+          } else {
+            mapHashesToFiles.set(checksum, {
+              data,
+              files: [file],
+            })
+          }
+        }))
 
         resolve()
       })
   })
 
   // flatten files
-  // const files = Array
-  //   .from(mapHashesToFiles)
-  //   .reduce((prevFiles, [ checksum, { files } ]) => {
-  //     return [
-  //       ...prevFiles,
-  //       ...files,
-  //     ];
-  //   }, []);
+  const files: IFile[] = Array
+    .from(mapHashesToFiles)
+    // tslint:disable-next-line: no-unused
+    .reduce((prevFiles: IFile[], [_, mapItem]) => {
+      return [
+        ...prevFiles,
+        ...mapItem.files,
+      ]
+    }, [])
 
-  // return { files, directories, mapHashesToFiles };
+  return {files, directories, mapHashesToFiles}
 }

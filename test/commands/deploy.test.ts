@@ -11,7 +11,7 @@ describe('deploy', () => {
   })
 
   it('should throw an error for invalid liara.json file', async () => {
-    let { stderr } = await run(['deploy', '--path', fixture('invalid-liara-json')])
+    let {stderr} = await run(['deploy', '--path', fixture('invalid-liara-json')])
     expect(stderr).to.contain('Syntax error')
-  })
+  }).timeout()
 })

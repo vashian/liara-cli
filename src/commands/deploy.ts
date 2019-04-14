@@ -1,15 +1,17 @@
-import {Command, flags} from '@oclif/command'
-import * as fs from 'fs-extra'
 import * as os from 'os'
-import * as path from 'path'
-import * as inquirer from 'inquirer'
 import chalk from 'chalk'
+import * as path from 'path'
+import * as fs from 'fs-extra'
+import * as inquirer from 'inquirer'
+import {Command, flags} from '@oclif/command'
 import axios, {AxiosRequestConfig} from 'axios'
 
-import detectPlatform from '../utils/detect-platform'
-import {API_BASE_URL} from '../constants'
 import getPort from '../utils/get-port'
+import getFiles from '../utils/get-files'
+import {API_BASE_URL} from '../constants'
 import validatePort from '../utils/validate-port'
+import {createDebugLogger} from '../utils/output'
+import detectPlatform from '../utils/detect-platform'
 
 interface ILiaraJSON {
   project?: string,
@@ -54,7 +56,7 @@ export default class Deploy extends Command {
     project: flags.string({char: 'p', description: 'project name'}),
     port: flags.integer({description: 'the port that your app listens to'}),
     volume: flags.string({char: 'v', description: 'volume absolute path'}),
-    debug: flags.boolean({description: 'show debug logs'}),
+    debug: flags.boolean({char: 'd', description: 'show debug logs'}),
     'api-token': flags.string({description: 'your api token to use for authentication'}),
   }
 
@@ -66,6 +68,7 @@ export default class Deploy extends Command {
   async run() {
     const {flags} = this.parse(Deploy)
     const config: IDeploymentConfig = this.getMergedConfig(flags)
+    const debug = createDebugLogger(flags.debug)
 
     this.dontDeployEmptyProjects(config.path)
 
@@ -96,7 +99,7 @@ export default class Deploy extends Command {
       : this.logKeyValue('Platform', config.platform)
     this.logKeyValue('Port', String(config.port))
 
-    // getFiles(config.path)
+    getFiles(config.path, debug)
   }
 
   dontDeployEmptyProjects(projectPath: string) {
