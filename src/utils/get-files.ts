@@ -1,8 +1,8 @@
 import hash from './hash'
 import ignore, {Ignore} from 'ignore'
-import * as klaw from 'klaw'
+import klaw from 'klaw'
 import * as fs from 'fs-extra'
-import * as through2 from 'through2'
+import through2 from 'through2'
 import {DebugLogger} from './output'
 import {resolve, relative, join, dirname} from 'path'
 
