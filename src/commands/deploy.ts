@@ -1,16 +1,23 @@
 import * as os from 'os'
+import cli from 'cli-ux'
 import chalk from 'chalk'
 import * as path from 'path'
+import bytes from 'bytes'
 import * as fs from 'fs-extra'
+import * as request from 'request'
 import * as inquirer from 'inquirer'
+import retry from 'async-retry'
+import archiver from 'archiver'
+import ProgressBar from 'progress'
 import {Command, flags} from '@oclif/command'
 import axios, {AxiosRequestConfig} from 'axios'
 
+import '../interceptors'
 import getPort from '../utils/get-port'
-import getFiles from '../utils/get-files'
-import {API_BASE_URL} from '../constants'
+import getFiles, {IMapItem} from '../utils/get-files'
+import {API_BASE_URL, GLOBAL_CONF_PATH} from '../constants'
 import validatePort from '../utils/validate-port'
-import {createDebugLogger} from '../utils/output'
+import {createDebugLogger, DebugLogger} from '../utils/output'
 import detectPlatform from '../utils/detect-platform'
 
 interface ILiaraJSON {
@@ -31,6 +38,7 @@ interface IFlags {
   project?: string,
   port?: number,
   volume?: string,
+  image?: string,
   'api-token'?: string,
 }
 
@@ -56,6 +64,7 @@ export default class Deploy extends Command {
     project: flags.string({char: 'p', description: 'project name'}),
     port: flags.integer({description: 'the port that your app listens to'}),
     volume: flags.string({char: 'v', description: 'volume absolute path'}),
+    image: flags.string({char: 'i', description: 'docker image to deploy'}),
     debug: flags.boolean({char: 'd', description: 'show debug logs'}),
     'api-token': flags.string({description: 'your api token to use for authentication'}),
   }
@@ -77,12 +86,15 @@ export default class Deploy extends Command {
     this.validateDeploymentConfig(config)
 
     let isPlatformDetected = false
-    if (!config.platform) {
-      config.platform = await detectPlatform(config.path)
-      isPlatformDetected = true
-    }
+    config.platform = 'docker'
+    if (!config.image) {
+      if (!config.platform) {
+        config.platform = await detectPlatform(config.path)
+        isPlatformDetected = true
+      }
 
-    // this.validatePlatform(config.platform, config.path)
+      this.validatePlatform(config.platform, config.path)
+    }
 
     if (!config.project) {
       config.project = await this.promptProject()
@@ -99,7 +111,80 @@ export default class Deploy extends Command {
       : this.logKeyValue('Platform', config.platform)
     this.logKeyValue('Port', String(config.port))
 
-    getFiles(config.path, debug)
+    try {
+      await this.deploy(config, debug)
+    } catch (error) {
+      error.response && debug(JSON.stringify(error.response.data))
+      this.error(`Deployment failed.\n${error.message}`)
+    }
+
+    this.log('Deploy finished successfully.')
+
+    // TODO: OnReady: Show project logs
+    // oclif.run('liara logs --project my-app')
+  }
+
+  async deploy(config: IDeploymentConfig, debug: DebugLogger) {
+    const body: {[k: string]: any} = {
+      port: config.port,
+      type: config.platform,
+      mountPoint: config.volume,
+    }
+
+    if (config.image) {
+      body.image = config.image
+      this.log('Creating a new release...')
+      return this.createRelease(config.project as string, body)
+    }
+
+    cli.action.start('Collecting project files...')
+    const {files, directories, mapHashesToFiles} = await getFiles(config.path, debug)
+
+    body.files = files
+    body.directories = directories
+
+    const retryOptions = {
+      onRetry: (error: any) => {
+        debug(`Retrying due to: ${error.message}`)
+        if (error.response) {
+          debug(error.response.data)
+        } else {
+          debug(error.stack)
+        }
+      },
+    }
+    await retry(async () => {
+      try {
+        await this.createRelease(config.project as string, body)
+
+      } catch (error) {
+        const {response} = error
+
+        if (!response) throw error // Retry deployment
+
+        if (response.status === 400 && response.data.message === 'frozen_project') {
+          this.error(`Project is frozen (not enough balance).
+  Please open up https://console.liara.ir/projects and unfreeze the project.`)
+        }
+
+        if (response.status === 400 && response.data.message === 'missing_files') {
+          const {missingFiles} = response.data.data
+
+          cli.action.start(`Files to upload: ${missingFiles.length}`)
+
+          await this.uploadMissingFiles(
+            mapHashesToFiles,
+            missingFiles,
+          )
+
+          throw error // Retry deployment
+        }
+      }
+    }, retryOptions)
+  }
+
+  createRelease(project: string, body: {[k: string]: any}) {
+    return axios.post(`/v2/projects/${project}/releases`, body, this.axiosConfig)
   }
 
   dontDeployEmptyProjects(projectPath: string) {
@@ -173,10 +258,9 @@ export default class Deploy extends Command {
 
   readGlobalConfig(): IGlobalLiaraConfig {
     let content
-    const globalConfPath = path.join(os.homedir(), '.liara.json')
 
     try {
-      content = JSON.parse(fs.readFileSync(globalConfPath).toString('utf-8')) || {}
+      content = JSON.parse(fs.readFileSync(GLOBAL_CONF_PATH).toString('utf-8')) || {}
     } catch {
       content = {}
     }
@@ -215,5 +299,70 @@ export default class Deploy extends Command {
 You must add a 'start' command to your package.json scripts.`)
       }
     }
+  }
+
+  async uploadMissingFiles(mapHashesToFiles: Map<string, IMapItem>, missingFiles: string[]) {
+    const archive = archiver('tar', {
+      gzip: true,
+      gzipOptions: {level: 9},
+    })
+
+    archive.on('error', (error: Error) => { throw error })
+
+    for (const hash of missingFiles) {
+      const mapItem = mapHashesToFiles.get(hash)
+      mapItem && archive.append(mapItem.data, {name: hash})
+    }
+
+    archive.finalize()
+
+    const tmpArchivePath = path.join(os.tmpdir(), `${Date.now()}.tar.gz`)
+
+    const archiveSize: number = await new Promise((resolve, reject) => {
+      archive.pipe(fs.createWriteStream(tmpArchivePath))
+        .on('error', reject)
+        .on('close', function () {
+          const {size} = fs.statSync(tmpArchivePath)
+          resolve(size)
+        })
+    })
+
+    this.logKeyValue('Compressed size', bytes(archiveSize))
+
+    const tmpArchiveStream = fs.createReadStream(tmpArchivePath)
+    const bar = new ProgressBar('Uploading [:bar] :rate/bps :percent :etas', {total: archiveSize})
+
+    return new Promise(resolve => {
+      const req = request.post({
+        url: '/v1/files/archive',
+        baseUrl: this.axiosConfig.baseURL,
+        body: tmpArchiveStream,
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          Authorization: this.axiosConfig.headers.Authorization,
+        },
+      }) as any
+
+      tmpArchiveStream.pipe(req)
+
+      const interval = setInterval(() => {
+        bar.tick(req.req.connection._bytesDispatched - bar.curr)
+
+        if (bar.complete) {
+          this.log('Upload finished.')
+          this.log('Extracting...')
+          clearInterval(interval)
+        }
+      }, 250)
+
+      tmpArchiveStream.pipe(req)
+        .on('response', async () => {
+          this.log('Extract finished.')
+          fs.unlink(tmpArchivePath)
+            .then(() => {})
+            .catch(() => {})
+          resolve()
+        })
+    })
   }
 }

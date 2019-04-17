@@ -30,6 +30,7 @@ USAGE
 <!-- commands -->
 * [`liara deploy`](#liara-deploy)
 * [`liara help [COMMAND]`](#liara-help-command)
+* [`liara login [FILE]`](#liara-login-file)
 
 ## `liara deploy`
 
@@ -40,10 +41,14 @@ USAGE
   $ liara deploy
 
 OPTIONS
+  -d, --debug            show debug logs
   -h, --help             show CLI help
+  -i, --image=image      docker image to deploy
   -p, --project=project  project name
-  --api_token=api_token  your api token to use for authentication
-  --path                 project path in your computer
+  -v, --volume=volume    volume absolute path
+  --api-token=api-token  your api token to use for authentication
+  --path=path            project path in your computer
+  --platform=platform    the platform your project needs to run
   --port=port            the port that your app listens to
 ```
 
@@ -65,4 +70,20 @@ OPTIONS
 ```
 
 _See code: [@oclif/plugin-help](https://github.com/oclif/plugin-help/blob/v2.1.6/src/commands/help.ts)_
+
+## `liara login [FILE]`
+
+describe the command here
+
+```
+USAGE
+  $ liara login [FILE]
+
+OPTIONS
+  -f, --force
+  -h, --help       show CLI help
+  -n, --name=name  name to print
+```
+
+_See code: [src/commands/login.ts](https://github.com/liara-ir/liara-cli/blob/v1.0.0/src/commands/login.ts)_
 <!-- commandsstop -->

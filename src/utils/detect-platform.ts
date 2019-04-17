@@ -1,4 +1,4 @@
-import * as path from 'path'
+import path from 'path'
 import {readJSONSync, existsSync} from 'fs-extra'
 
 export default function detectPlatform(projectPath: string) {

@@ -1,5 +1,5 @@
 import hash from './hash'
-import ignore from 'ignore'
+import ignore, {Ignore} from 'ignore'
 import * as klaw from 'klaw'
 import * as fs from 'fs-extra'
 import * as through2 from 'through2'
@@ -25,19 +25,19 @@ interface IKlawItem {
   stats: fs.Stats,
 }
 
-interface IMapItem {
+export interface IMapItem {
   data: Buffer,
   files: IFile[],
 }
 
-interface IFile {
+export interface IFile {
   checksum: string,
   path: string,
   size: number,
   mode: number,
 }
 
-interface IDirectory {
+export interface IDirectory {
   path: string,
   mode: number,
 }
@@ -51,7 +51,7 @@ function trimLines(lines: string[]): string[] {
   }, [] as string[])
 }
 
-const loadIgnoreFile = (ignoreInstance: any, ignoreFilePath: string, projectPath: string) => {
+const loadIgnoreFile = (ignoreInstance: Ignore, ignoreFilePath: string, projectPath: string) => {
   const patterns: string[] = trimLines(
     fs.readFileSync(ignoreFilePath).toString().split('\n')
   )
@@ -67,7 +67,7 @@ const loadIgnoreFile = (ignoreInstance: any, ignoreFilePath: string, projectPath
   ignoreInstance.add(relativeToProjectPath)
 }
 
-function addIgnorePatterns(ignoreInstance: any, projectPath: string) {
+function addIgnorePatterns(ignoreInstance: Ignore, projectPath: string) {
   return through2.obj(function (item, _, next) {
     const liaraignorePath = join(dirname(item.path), '.liaraignore')
     const dockerignorePath = join(dirname(item.path), '.dockerignore')
@@ -86,7 +86,7 @@ function addIgnorePatterns(ignoreInstance: any, projectPath: string) {
   })
 }
 
-function ignoreFiles(ignoreInstance: any, projectPath: string, debug: DebugLogger) {
+function ignoreFiles(ignoreInstance: Ignore, projectPath: string, debug: DebugLogger) {
   return through2.obj(function (item, _, next) {
     const itemPath = relative(projectPath, item.path)
 
