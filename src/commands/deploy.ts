@@ -13,6 +13,7 @@ import {Command, flags} from '@oclif/command'
 import axios, {AxiosRequestConfig} from 'axios'
 
 import '../interceptors'
+import Poller from '../utils/poller'
 import getPort from '../utils/get-port'
 import getFiles, {IMapItem} from '../utils/get-files'
 import {API_BASE_URL, GLOBAL_CONF_PATH} from '../constants'
@@ -54,6 +55,19 @@ interface IGetProjectsResponse {
   projects: IProject[]
 }
 
+interface IBuildLogsResponse {
+  release: { state: string },
+  buildOutput: IBuildOutput[],
+}
+
+interface IBuildOutput {
+  _id: string,
+  line: string,
+  stream: string,
+  releaseID: string,
+  createdAt: string,
+}
+
 export default class Deploy extends Command {
   static description = 'deploys a project'
 
@@ -86,7 +100,6 @@ export default class Deploy extends Command {
     this.validateDeploymentConfig(config)
 
     let isPlatformDetected = false
-    config.platform = 'docker'
     if (!config.image) {
       if (!config.platform) {
         config.platform = await detectPlatform(config.path)
@@ -94,6 +107,8 @@ export default class Deploy extends Command {
       }
 
       this.validatePlatform(config.platform, config.path)
+    } else {
+      config.platform = 'docker'
     }
 
     if (!config.project) {
@@ -112,16 +127,24 @@ export default class Deploy extends Command {
     this.logKeyValue('Port', String(config.port))
 
     try {
-      await this.deploy(config, debug)
+      const response = await this.deploy(config, debug)
+
+      if (!response || !response.data) {
+        return this.error(`deploy: ${JSON.stringify(response)}`)
+      }
+
+      cli.action.start('Building...')
+      await this.showBuildLogs(response.data.releaseID)
+      cli.action.start('Build finished.')
+
+      // TODO: OnReady: Show project logs
+      // oclif.run('liara logs --project my-app')
+
     } catch (error) {
+      this.log()
       error.response && debug(JSON.stringify(error.response.data))
       this.error(`Deployment failed.\n${error.message}`)
     }
-
-    this.log('Deploy finished successfully.')
-
-    // TODO: OnReady: Show project logs
-    // oclif.run('liara logs --project my-app')
   }
 
   async deploy(config: IDeploymentConfig, debug: DebugLogger) {
@@ -139,6 +162,7 @@ export default class Deploy extends Command {
 
     cli.action.start('Collecting project files...')
     const {files, directories, mapHashesToFiles} = await getFiles(config.path, debug)
+    cli.action.stop('Files collected.')
 
     body.files = files
     body.directories = directories
@@ -147,15 +171,15 @@ export default class Deploy extends Command {
       onRetry: (error: any) => {
         debug(`Retrying due to: ${error.message}`)
         if (error.response) {
-          debug(error.response.data)
+          debug(JSON.stringify(error.response.data))
         } else {
           debug(error.stack)
         }
       },
     }
-    await retry(async () => {
+    return retry(async bail => {
       try {
-        await this.createRelease(config.project as string, body)
+        return await this.createRelease(config.project as string, body)
 
       } catch (error) {
         const {response} = error
@@ -179,12 +203,68 @@ export default class Deploy extends Command {
 
           throw error // Retry deployment
         }
+
+        return bail(error)
       }
     }, retryOptions)
   }
 
   createRelease(project: string, body: {[k: string]: any}) {
-    return axios.post(`/v2/projects/${project}/releases`, body, this.axiosConfig)
+    return axios.post<{ releaseID: string }>(`/v2/projects/${project}/releases`, body, this.axiosConfig)
+  }
+
+  async showBuildLogs(releaseID: string) {
+    return new Promise((resolve, reject) => {
+      const poller = new Poller()
+
+      let since: string
+
+      poller.onPoll(async () => {
+        const {data: {release, buildOutput}} = await axios.get<IBuildLogsResponse>(
+          `/v2/releases/${releaseID}/build-logs`, {
+            ...this.axiosConfig,
+            params: {since},
+          })
+
+        for (const output of buildOutput) {
+          if (output.stream === 'STDOUT') {
+            process.stdout.write(output.line)
+            // if (output.line.trim() === output.line || output.line === '\n') {
+            //   process.stdout.write(output.line)
+
+            // } else {
+            //   process.stdout.write(`${chalk.cyan('|')} ${output.line}`)
+            // }
+          } else {
+            // tslint:disable-next-line: no-console
+            console.error(chalk.red('|'), output.line)
+            return reject(new Error('Build failed.'))
+          }
+        }
+
+        if (!buildOutput.length) {
+          if (release.state === 'CANCELED') {
+            return reject(new Error('Build canceled.'))
+          }
+
+          if (release.state === 'FAILED') {
+            return reject(new Error('Release failed.'))
+          }
+
+          if (['DEPLOYING', 'READY'].includes(release.state)) {
+            return resolve()
+          }
+        }
+
+        if (buildOutput.length) {
+          since = buildOutput[buildOutput.length - 1].createdAt
+        }
+
+        poller.poll()
+      })
+
+      poller.poll()
+    })
   }
 
   dontDeployEmptyProjects(projectPath: string) {
