@@ -12,7 +12,7 @@ export default function detectPlatform(projectPath: string) {
 
   if (hasComposerJsonFile && hasDockerFile) {
     throw new Error(`The project contains both of the \`composer.json\` and \`Dockerfile\` files.
-Please specify your deployment type with --laravel or --docker.`)
+Please specify your platform with --platform=laravel or docker.`)
   }
 
   if (hasComposerJsonFile) {
@@ -28,7 +28,7 @@ Currently, we only support Laravel projects in the PHP ecosystem.\n`)
 
   if (hasPackageFile && hasDockerFile) {
     throw new Error(`The project contains both of the \`package.json\` and \`Dockerfile\` files.
-Please specify your deployment type with --node or --docker.`)
+Please specify your platform with --platform=node or docker.`)
   }
 
   if (hasPackageFile) {
@@ -43,7 +43,7 @@ Please specify your deployment type with --node or --docker.`)
 
   if (hasWPContent && hasDockerFile) {
     throw new Error(`The project contains a \`Dockerfile\`.
-Please specify your deployment type with --wordpress or --docker.`)
+Please specify your platform with --platform=wordpress or docker.`)
   }
 
   if (hasWPContent) {

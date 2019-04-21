@@ -1,11 +1,12 @@
-import * as os from 'os'
+import os from 'os'
+import ora from 'ora'
 import cli from 'cli-ux'
 import chalk from 'chalk'
-import * as path from 'path'
+import path from 'path'
 import bytes from 'bytes'
-import * as fs from 'fs-extra'
-import * as request from 'request'
-import * as inquirer from 'inquirer'
+import fs from 'fs-extra'
+import request from 'request'
+import inquirer from 'inquirer'
 import retry from 'async-retry'
 import archiver from 'archiver'
 import ProgressBar from 'progress'
@@ -15,11 +16,13 @@ import axios, {AxiosRequestConfig} from 'axios'
 import '../interceptors'
 import Poller from '../utils/poller'
 import getPort from '../utils/get-port'
+import onInterupt from '../utils/on-intrupt'
 import getFiles, {IMapItem} from '../utils/get-files'
-import {API_BASE_URL, GLOBAL_CONF_PATH} from '../constants'
+import {API_BASE_URL, GLOBAL_CONF_PATH, DEV_MODE} from '../constants'
 import validatePort from '../utils/validate-port'
-import {createDebugLogger, DebugLogger} from '../utils/output'
+import {createDebugLogger} from '../utils/output'
 import detectPlatform from '../utils/detect-platform'
+import eraseLines from '../utils/erase-lines';
 
 interface ILiaraJSON {
   project?: string,
@@ -88,10 +91,16 @@ export default class Deploy extends Command {
     baseURL: API_BASE_URL,
   }
 
+  spinner!: ora.Ora
+
   async run() {
     const {flags} = this.parse(Deploy)
     const config: IDeploymentConfig = this.getMergedConfig(flags)
     const debug = createDebugLogger(flags.debug)
+    this.debug = debug
+    this.spinner = ora()
+
+    this.debug()
 
     this.dontDeployEmptyProjects(config.path)
 
@@ -102,8 +111,12 @@ export default class Deploy extends Command {
     let isPlatformDetected = false
     if (!config.image) {
       if (!config.platform) {
-        config.platform = await detectPlatform(config.path)
-        isPlatformDetected = true
+        try {
+          config.platform = await detectPlatform(config.path)
+          isPlatformDetected = true
+        } catch (error) {
+          return this.error(error.message)
+        }
       }
 
       this.validatePlatform(config.platform, config.path)
@@ -127,27 +140,36 @@ export default class Deploy extends Command {
     this.logKeyValue('Port', String(config.port))
 
     try {
-      const response = await this.deploy(config, debug)
+      const response = await this.deploy(config)
 
       if (!response || !response.data) {
         return this.error(`deploy: ${JSON.stringify(response)}`)
       }
 
-      cli.action.start('Building...')
       await this.showBuildLogs(response.data.releaseID)
-      cli.action.start('Build finished.')
+
+      this.log()
+      this.log(chalk.green('Deployment finished successfully.'))
+      this.log(chalk.white('Open up the url below in your browser:'))
+      this.log()
+      DEV_MODE
+        ? this.log(`    ${chalk.cyan(`http://${config.project}.liara.localhost`)}`)
+        : this.log(`    ${chalk.cyan(`https://${config.project}.liara.run`)}`)
+      this.log()
 
       // TODO: OnReady: Show project logs
       // oclif.run('liara logs --project my-app')
 
     } catch (error) {
       this.log()
+      this.spinner.stop()
       error.response && debug(JSON.stringify(error.response.data))
-      this.error(`Deployment failed.\n${error.message}`)
+      this.error(`Deployment failed.
+Sorry for inconvenience. Please contact us.`)
     }
   }
 
-  async deploy(config: IDeploymentConfig, debug: DebugLogger) {
+  async deploy(config: IDeploymentConfig) {
     const body: {[k: string]: any} = {
       port: config.port,
       type: config.platform,
@@ -160,20 +182,20 @@ export default class Deploy extends Command {
       return this.createRelease(config.project as string, body)
     }
 
-    cli.action.start('Collecting project files...')
-    const {files, directories, mapHashesToFiles} = await getFiles(config.path, debug)
-    cli.action.stop('Files collected.')
+    this.spinner.start('Collecting project files...')
+    const {files, directories, mapHashesToFiles} = await getFiles(config.path, this.debug)
+    this.spinner.stop()
 
     body.files = files
     body.directories = directories
 
     const retryOptions = {
       onRetry: (error: any) => {
-        debug(`Retrying due to: ${error.message}`)
+        this.debug(`Retrying due to: ${error.message}`)
         if (error.response) {
-          debug(JSON.stringify(error.response.data))
+          this.debug(JSON.stringify(error.response.data))
         } else {
-          debug(error.stack)
+          this.debug(error.stack)
         }
       },
     }
@@ -194,7 +216,7 @@ export default class Deploy extends Command {
         if (response.status === 400 && response.data.message === 'missing_files') {
           const {missingFiles} = response.data.data
 
-          cli.action.start(`Files to upload: ${missingFiles.length}`)
+          this.spinner.start(`Files to upload: ${missingFiles.length}`)
 
           await this.uploadMissingFiles(
             mapHashesToFiles,
@@ -214,56 +236,97 @@ export default class Deploy extends Command {
   }
 
   async showBuildLogs(releaseID: string) {
+    this.spinner.start('Building...')
+
+    let isCanceled = false
+
+    onInterupt(async () => {
+      // Force close
+      if (isCanceled) process.exit(3)
+
+      this.spinner.start('\nCanceling the build...')
+      isCanceled = true
+
+      const retryOptions = {
+        retries: 3,
+        onRetry: (error: any, attempt: number) => {
+          this.debug(error.stack)
+          this.log(`${attempt}: Could not cancel, retrying...`)
+        }
+      }
+      await retry(async () => {
+        await axios.post(`/v2/releases/${releaseID}/cancel`, null, this.axiosConfig)
+      }, retryOptions)
+
+      this.spinner.warn('Build canceled.')
+      process.exit(3)
+    })
+
     return new Promise((resolve, reject) => {
       const poller = new Poller()
 
       let since: string
+      let isDeploying = false
 
       poller.onPoll(async () => {
-        const {data: {release, buildOutput}} = await axios.get<IBuildLogsResponse>(
-          `/v2/releases/${releaseID}/build-logs`, {
-            ...this.axiosConfig,
-            params: {since},
-          })
+        try {
+          const {data: {release, buildOutput}} = await axios.get<IBuildLogsResponse>(
+            `/v2/releases/${releaseID}/build-logs`, {
+              ...this.axiosConfig,
+              params: {since},
+            })
 
-        for (const output of buildOutput) {
-          if (output.stream === 'STDOUT') {
-            process.stdout.write(output.line)
-            // if (output.line.trim() === output.line || output.line === '\n') {
-            //   process.stdout.write(output.line)
+          for (const output of buildOutput) {
+            this.spinner.clear().frame()
 
-            // } else {
-            //   process.stdout.write(`${chalk.cyan('|')} ${output.line}`)
-            // }
-          } else {
-            // tslint:disable-next-line: no-console
-            console.error(chalk.red('|'), output.line)
-            return reject(new Error('Build failed.'))
+            if (output.stream === 'STDOUT') {
+              process.stdout.write(output.line)
+            } else {
+              // tslint:disable-next-line: no-console
+              console.error(output.line)
+              return reject(new Error('Build failed.'))
+            }
           }
+
+          if (!buildOutput.length) {
+            if (release.state === 'CANCELED') {
+              return reject(new Error('Build canceled.'))
+            }
+
+            if (release.state === 'FAILED') {
+              return reject(new Error('Release failed.'))
+            }
+
+            if (release.state === 'DEPLOYING' && !isDeploying) {
+              isDeploying = true
+              this.spinner.succeed('Image pushed.')
+              this.spinner.start('Creating a new release...')
+            }
+
+            if (release.state === 'READY') {
+              this.spinner.succeed('Release created.')
+              return resolve()
+            }
+          }
+
+          if (buildOutput.length) {
+            const lastLine = buildOutput[buildOutput.length - 1]
+            since = lastLine.createdAt
+
+            if (lastLine.line.startsWith('Successfully tagged')) {
+              this.spinner.succeed('Build finished.')
+              this.spinner.start('Pushing the image...')
+            }
+          }
+
+        } catch (error) {
+          this.debug(error.stack)
         }
 
-        if (!buildOutput.length) {
-          if (release.state === 'CANCELED') {
-            return reject(new Error('Build canceled.'))
-          }
-
-          if (release.state === 'FAILED') {
-            return reject(new Error('Release failed.'))
-          }
-
-          if (['DEPLOYING', 'READY'].includes(release.state)) {
-            return resolve()
-          }
-        }
-
-        if (buildOutput.length) {
-          since = buildOutput[buildOutput.length - 1].createdAt
-        }
-
-        poller.poll()
+        !isCanceled && poller.poll()
       })
 
-      poller.poll()
+      !isCanceled && poller.poll()
     })
   }
 
@@ -274,6 +337,7 @@ export default class Deploy extends Command {
   }
 
   logKeyValue(key: string, value: string): void {
+    this.spinner.clear().frame()
     this.log(`${chalk.gray(`${key}:`)} ${value}`)
   }
 
@@ -292,23 +356,33 @@ export default class Deploy extends Command {
   }
 
   async promptProject(): Promise<string> {
-    const {data: {projects}} = await axios.get<IGetProjectsResponse>('/v1/projects', this.axiosConfig)
+    this.spinner.start('Loading...')
 
-    if (!projects.length) {
-      this.warn('Please go to https://console.liara.ir/projects and create a project, first.')
-      this.exit(1)
+    try {
+      const {data: {projects}} = await axios.get<IGetProjectsResponse>('/v1/projects', this.axiosConfig)
+
+      this.spinner.stop()
+
+      if (!projects.length) {
+        this.warn('Please go to https://console.liara.ir/projects and create a project, first.')
+        this.exit(1)
+      }
+
+      const {project} = await inquirer.prompt({
+        name: 'project',
+        type: 'list',
+        message: 'Please select a project:',
+        choices: [
+          ...projects.map(project => project.project_id),
+        ]
+      })
+
+      return project
+
+    } catch (error) {
+      this.spinner.stop()
+      throw error
     }
-
-    const {project} = await inquirer.prompt({
-      name: 'project',
-      type: 'list',
-      message: 'Please select a project:',
-      choices: [
-        ...projects.map(project => project.project_id),
-      ]
-    })
-
-    return project
   }
 
   async promptPort(): Promise<number> {
@@ -429,15 +503,15 @@ You must add a 'start' command to your package.json scripts.`)
         bar.tick(req.req.connection._bytesDispatched - bar.curr)
 
         if (bar.complete) {
-          this.log('Upload finished.')
-          this.log('Extracting...')
+          this.spinner.succeed('Upload finished.')
+          this.spinner.start('Extracting...')
           clearInterval(interval)
         }
       }, 250)
 
       tmpArchiveStream.pipe(req)
         .on('response', async () => {
-          this.log('Extract finished.')
+          this.spinner.succeed('Extract finished.')
           fs.unlink(tmpArchivePath)
             .then(() => {})
             .catch(() => {})
