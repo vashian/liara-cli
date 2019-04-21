@@ -1,6 +1,5 @@
 import os from 'os'
 import ora from 'ora'
-import cli from 'cli-ux'
 import chalk from 'chalk'
 import path from 'path'
 import bytes from 'bytes'
@@ -164,6 +163,11 @@ export default class Deploy extends Command {
       this.log()
       this.spinner.stop()
       error.response && debug(JSON.stringify(error.response.data))
+
+      if (error.message === 'TIMEOUT') {
+        this.error('Build timed out. It took about 10 minutes.')
+      }
+
       this.error(`Deployment failed.
 Sorry for inconvenience. Please contact us.`)
     }
@@ -291,6 +295,10 @@ Sorry for inconvenience. Please contact us.`)
           if (!buildOutput.length) {
             if (release.state === 'CANCELED') {
               return reject(new Error('Build canceled.'))
+            }
+
+            if (release.state === 'TIMEDOUT') {
+              return reject(new Error('TIMEOUT'))
             }
 
             if (release.state === 'FAILED') {
