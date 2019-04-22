@@ -40,4 +40,14 @@ describe('utils', () => {
     const {files} = await getFiles(fixture('override-default-ignores'))
     expect(files).to.have.length(2)
   })
+
+  it('case sensitive ignore', async () => {
+    const {files} = await getFiles(fixture('ignore-case-sensitive'))
+    expect(files).to.have.length(1)
+  })
+
+  it('should ignore absolute patterns', async () => {
+    const {files} = await getFiles(fixture('ignore-absolute-patterns'))
+    expect(files).to.have.length(1)
+  })
 })

@@ -1,7 +1,7 @@
 import hash from './hash'
 import ignore, {Ignore} from 'ignore'
 import klaw from 'klaw'
-import * as fs from 'fs-extra'
+import fs from 'fs-extra'
 import through2 from 'through2'
 import {DebugLogger} from './output'
 import {resolve, relative, join, dirname} from 'path'
@@ -59,9 +59,11 @@ const loadIgnoreFile = (ignoreInstance: Ignore, ignoreFilePath: string, projectP
   const relativeToProjectPath = patterns.map((pattern: string) => {
     const dir = dirname(ignoreFilePath)
     if (pattern.startsWith('!')) {
-      return '!' + relative(projectPath, join(dir, pattern.substr(1)))
+      const absolutePrefix = pattern.substr(1).startsWith('/') ? '/' : ''
+      return '!' + absolutePrefix + relative(projectPath, join(dir, pattern.substr(1)))
     }
-    return relative(projectPath, join(dir, pattern))
+    const absolutePrefix = pattern.startsWith('/') ? '/' : ''
+    return absolutePrefix + relative(projectPath, join(dir, pattern))
   })
 
   ignoreInstance.add(relativeToProjectPath)
@@ -118,7 +120,7 @@ export default async function getFiles(projectPath: string, debug: DebugLogger =
   const mapHashesToFiles = new Map<string, IMapItem>()
   const directories: IDirectory[] = []
 
-  const ignoreInstance = ignore()
+  const ignoreInstance = ignore({ignorecase: false})
   ignoreInstance.add(defaultIgnores)
 
   await new Promise(resolve => {

@@ -30,7 +30,8 @@ USAGE
 <!-- commands -->
 * [`liara deploy`](#liara-deploy)
 * [`liara help [COMMAND]`](#liara-help-command)
-* [`liara login [FILE]`](#liara-login-file)
+* [`liara login`](#liara-login)
+* [`liara logs [FILE]`](#liara-logs-file)
 
 ## `liara deploy`
 
@@ -71,13 +72,30 @@ OPTIONS
 
 _See code: [@oclif/plugin-help](https://github.com/oclif/plugin-help/blob/v2.1.6/src/commands/help.ts)_
 
-## `liara login [FILE]`
+## `liara login`
+
+logins to your account
+
+```
+USAGE
+  $ liara login
+
+OPTIONS
+  -d, --debug              show debug logs
+  -e, --email=email        your email
+  -h, --help               show CLI help
+  -p, --password=password  your password
+```
+
+_See code: [src/commands/login.ts](https://github.com/liara-ir/liara-cli/blob/v1.0.0/src/commands/login.ts)_
+
+## `liara logs [FILE]`
 
 describe the command here
 
 ```
 USAGE
-  $ liara login [FILE]
+  $ liara logs [FILE]
 
 OPTIONS
   -f, --force
@@ -85,5 +103,5 @@ OPTIONS
   -n, --name=name  name to print
 ```
 
-_See code: [src/commands/login.ts](https://github.com/liara-ir/liara-cli/blob/v1.0.0/src/commands/login.ts)_
+_See code: [src/commands/logs.ts](https://github.com/liara-ir/liara-cli/blob/v1.0.0/src/commands/logs.ts)_
 <!-- commandsstop -->

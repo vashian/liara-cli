@@ -10,6 +10,7 @@
   "dependencies": {
     "@oclif/command": "^1.5.12",
     "@oclif/config": "^1.12.12",
+    "@oclif/errors": "^1.2.2",
     "@oclif/plugin-help": "^2.1.6",
     "ansi-escapes": "^4.1.0",
     "archiver": "^3.0.0",
@@ -24,6 +25,7 @@
     "ignore": "^5.1.0",
     "inquirer": "^6.2.2",
     "klaw": "^3.0.0",
+    "moment": "^2.24.0",
     "ora": "^3.4.0",
     "progress": "^2.0.3",
     "request": "^2.88.0",

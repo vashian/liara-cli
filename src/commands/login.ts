@@ -4,21 +4,21 @@ import fs from 'fs-extra'
 import retry from 'async-retry'
 import {prompt} from 'inquirer'
 import promptEmail from 'email-prompt'
-import {Command, flags} from '@oclif/command'
+import {flags} from '@oclif/command'
 import {validate as validateEmail} from 'email-validator'
 
+import Command from '../base'
 import eraseLines from '../utils/erase-lines'
 import {createDebugLogger} from '../utils/output'
-import {API_BASE_URL, GLOBAL_CONF_PATH} from '../constants'
+import {GLOBAL_CONF_PATH} from '../constants'
 
 export default class Login extends Command {
-  static description = 'logins to your account'
+  static description = 'login to your account'
 
   static flags = {
-    help: flags.help({char: 'h'}),
+    ...Command.flags,
     email: flags.string({char: 'e', description: 'your email'}),
     password: flags.string({char: 'p', description: 'your password'}),
-    debug: flags.boolean({char: 'd', description: 'show debug logs'}),
   }
 
   async run() {
@@ -42,42 +42,30 @@ export default class Login extends Command {
           process.stdout.write(eraseLines(1))
         }
       } while (!emailIsValid)
+
+      this.log()
     }
 
     if (!flags.password) {
-      this.log()
       body.password = await this.promptPassword()
     }
 
-    try {
-      const {api_token} = await retry(async bail => {
-        try {
-          const {data} = await axios.post('/v1/login', body, {
-            baseURL: API_BASE_URL,
-          })
-          return data
-        } catch (err) {
-          if ((err.response && err.response.status === 401) || err.oclif.exit === 2) {
-            return bail(err)
-          }
-          debug('retrying...')
-          throw err
-        }
-      }, {})
-
-      fs.writeFileSync(GLOBAL_CONF_PATH, JSON.stringify({
-        api_token,
-      }))
-
-      this.log(`> Auth credentials saved in ${chalk.bold(GLOBAL_CONF_PATH)}`)
-      this.log(chalk.green('You have logged in successfully.'))
-
-    } catch (err) {
-      if (err.response && err.response.status === 401) {
-        this.error('Authentication failed. Please try again.')
+    const {api_token} = await retry(async () => {
+      try {
+        const {data} = await axios.post('/v1/login', body, this.axiosConfig)
+        return data
+      } catch (err) {
+        debug('retrying...')
+        throw err
       }
-      throw err
-    }
+    }, {retries: 3})
+
+    fs.writeFileSync(GLOBAL_CONF_PATH, JSON.stringify({
+      api_token,
+    }))
+
+    this.log(`> Auth credentials saved in ${chalk.bold(GLOBAL_CONF_PATH)}`)
+    this.log(chalk.green('You have logged in successfully.'))
   }
 
   async promptEmail(): Promise<string> {

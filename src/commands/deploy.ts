@@ -1,27 +1,27 @@
 import os from 'os'
 import ora from 'ora'
-import chalk from 'chalk'
 import path from 'path'
+import chalk from 'chalk'
 import bytes from 'bytes'
 import fs from 'fs-extra'
+import axios from 'axios'
 import request from 'request'
 import inquirer from 'inquirer'
 import retry from 'async-retry'
 import archiver from 'archiver'
 import ProgressBar from 'progress'
-import {Command, flags} from '@oclif/command'
-import axios, {AxiosRequestConfig} from 'axios'
+import {flags} from '@oclif/command'
 
-import '../interceptors'
+import Logs from './logs'
+import Command from '../base'
 import Poller from '../utils/poller'
+import {DEV_MODE} from '../constants'
 import getPort from '../utils/get-port'
 import onInterupt from '../utils/on-intrupt'
 import getFiles, {IMapItem} from '../utils/get-files'
-import {API_BASE_URL, GLOBAL_CONF_PATH, DEV_MODE} from '../constants'
 import validatePort from '../utils/validate-port'
 import {createDebugLogger} from '../utils/output'
 import detectPlatform from '../utils/detect-platform'
-import eraseLines from '../utils/erase-lines';
 
 interface ILiaraJSON {
   project?: string,
@@ -30,12 +30,7 @@ interface ILiaraJSON {
   volume?: string,
 }
 
-interface IGlobalLiaraConfig {
-  'api-token'?: string,
-}
-
 interface IFlags {
-  help?: boolean | void,
   path?: string,
   platform?: string,
   project?: string,
@@ -43,6 +38,7 @@ interface IFlags {
   volume?: string,
   image?: string,
   'api-token'?: string,
+  'no-project-logs': boolean,
 }
 
 interface IDeploymentConfig extends IFlags {
@@ -71,23 +67,17 @@ interface IBuildOutput {
 }
 
 export default class Deploy extends Command {
-  static description = 'deploys a project'
+  static description = 'deploy a project'
 
   static flags = {
-    help: flags.help({char: 'h'}),
+    ...Command.flags,
     path: flags.string({description: 'project path in your computer'}),
     platform: flags.string({description: 'the platform your project needs to run'}),
-    project: flags.string({char: 'p', description: 'project name'}),
+    project: flags.string({char: 'p', description: 'project id'}),
     port: flags.integer({description: 'the port that your app listens to'}),
     volume: flags.string({char: 'v', description: 'volume absolute path'}),
     image: flags.string({char: 'i', description: 'docker image to deploy'}),
-    debug: flags.boolean({char: 'd', description: 'show debug logs'}),
-    'api-token': flags.string({description: 'your api token to use for authentication'}),
-  }
-
-  axiosConfig: AxiosRequestConfig = {
-    ...axios.defaults,
-    baseURL: API_BASE_URL,
+    'no-project-logs': flags.boolean({description: 'do not stream project logs after deployment', default: false}),
   }
 
   spinner!: ora.Ora
@@ -152,12 +142,12 @@ export default class Deploy extends Command {
       this.log(chalk.white('Open up the url below in your browser:'))
       this.log()
       DEV_MODE
+        // tslint:disable-next-line: no-http-string
         ? this.log(`    ${chalk.cyan(`http://${config.project}.liara.localhost`)}`)
         : this.log(`    ${chalk.cyan(`https://${config.project}.liara.run`)}`)
       this.log()
 
-      // TODO: OnReady: Show project logs
-      // oclif.run('liara logs --project my-app')
+      !flags['no-project-logs'] && await Logs.run(['--project', config.project])
 
     } catch (error) {
       this.log()
@@ -416,24 +406,6 @@ Sorry for inconvenience. Please contact us.`)
       ...projectConfig,
       ...flags,
     }
-  }
-
-  readGlobalConfig(): IGlobalLiaraConfig {
-    let content
-
-    try {
-      content = JSON.parse(fs.readFileSync(GLOBAL_CONF_PATH).toString('utf-8')) || {}
-    } catch {
-      content = {}
-    }
-
-    // For backward compatibility with < 1.0.0 versions
-    if (content.api_token) {
-      content['api-token'] = content.api_token
-      delete content.api_token
-    }
-
-    return content
   }
 
   readProjectConfig(projectPath: string): ILiaraJSON {
