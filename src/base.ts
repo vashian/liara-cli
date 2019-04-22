@@ -46,6 +46,6 @@ export default abstract class extends Command {
 Please check your network connection.`)
     }
 
-    super.catch(error)
+    this.error(error.message)
   }
 }

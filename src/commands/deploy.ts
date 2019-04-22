@@ -22,6 +22,7 @@ import getFiles, {IMapItem} from '../utils/get-files'
 import validatePort from '../utils/validate-port'
 import {createDebugLogger} from '../utils/output'
 import detectPlatform from '../utils/detect-platform'
+import checkPath from '../utils/check-path';
 
 interface ILiaraJSON {
   project?: string,
@@ -91,6 +92,12 @@ export default class Deploy extends Command {
 
     this.debug()
 
+    try {
+      checkPath(config.path)
+    } catch (error) {
+      this.error(error.message)
+    }
+
     this.dontDeployEmptyProjects(config.path)
 
     this.setAxiosToken(config)
@@ -101,7 +108,7 @@ export default class Deploy extends Command {
     if (!config.image) {
       if (!config.platform) {
         try {
-          config.platform = await detectPlatform(config.path)
+          config.platform = detectPlatform(config.path)
           isPlatformDetected = true
         } catch (error) {
           return this.error(error.message)
