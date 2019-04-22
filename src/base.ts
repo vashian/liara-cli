@@ -46,6 +46,7 @@ export default abstract class extends Command {
 Please check your network connection.`)
     }
 
+    if (error.oclif && error.oclif.exit === 0) return
     this.error(error.message)
   }
 }

@@ -142,7 +142,8 @@ export default class Deploy extends Command {
         return this.error(`deploy: ${JSON.stringify(response)}`)
       }
 
-      await this.showBuildLogs(response.data.releaseID)
+      !config.image && await this.showBuildLogs(response.data.releaseID)
+      config.image && await this.showReleaseLogs(response.data.releaseID)
 
       this.log()
       this.log(chalk.green('Deployment finished successfully.'))
@@ -154,7 +155,10 @@ export default class Deploy extends Command {
         : this.log(`    ${chalk.cyan(`https://${config.project}.liara.run`)}`)
       this.log()
 
-      !flags['no-project-logs'] && await Logs.run(['--project', config.project])
+      if (!flags['no-project-logs']) {
+        this.log('Reading project logs...')
+        await Logs.run(['--project', config.project])
+      }
 
     } catch (error) {
       this.log()
@@ -179,7 +183,6 @@ Sorry for inconvenience. Please contact us.`)
 
     if (config.image) {
       body.image = config.image
-      this.log('Creating a new release...')
       return this.createRelease(config.project as string, body)
     }
 
@@ -241,7 +244,7 @@ Sorry for inconvenience. Please contact us.`)
 
     let isCanceled = false
 
-    onInterupt(async () => {
+    const removeInterupListener = onInterupt(async () => {
       // Force close
       if (isCanceled) process.exit(3)
 
@@ -291,7 +294,8 @@ Sorry for inconvenience. Please contact us.`)
 
           if (!buildOutput.length) {
             if (release.state === 'CANCELED') {
-              return reject(new Error('Build canceled.'))
+              this.spinner.warn('Build canceled.')
+              process.exit(3)
             }
 
             if (release.state === 'TIMEDOUT') {
@@ -321,6 +325,7 @@ Sorry for inconvenience. Please contact us.`)
             if (lastLine.line.startsWith('Successfully tagged')) {
               this.spinner.succeed('Build finished.')
               this.spinner.start('Pushing the image...')
+              removeInterupListener()
             }
           }
 
@@ -332,6 +337,34 @@ Sorry for inconvenience. Please contact us.`)
       })
 
       !isCanceled && poller.poll()
+    })
+  }
+
+  async showReleaseLogs(releaseID: string) {
+    this.spinner.start('Creating a new release...')
+
+    return new Promise(resolve => {
+      const poller = new Poller()
+
+      poller.onPoll(async () => {
+        try {
+          const {data: {release}} = await axios.get<{
+            release: {state: string, status: string}
+          }>(`/v1/releases/${releaseID}`, this.axiosConfig)
+
+          if (release.state === 'READY') {
+            this.spinner.succeed('Release created.')
+            return resolve()
+          }
+
+        } catch (error) {
+          this.debug(error.stack)
+        }
+
+        poller.poll()
+      })
+
+      poller.poll()
     })
   }
 
