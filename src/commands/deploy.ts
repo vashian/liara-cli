@@ -24,6 +24,7 @@ import getFiles, {IMapItem} from '../utils/get-files'
 import validatePort from '../utils/validate-port'
 import {createDebugLogger} from '../utils/output'
 import detectPlatform from '../utils/detect-platform'
+import collectGitInfo from '../utils/collect-git-info';
 
 interface ILaravelPlatformConfig {
   routeCache?: boolean,
@@ -67,6 +68,8 @@ interface IFlags {
   'detach': boolean,
   args?: string[],
   'build-arg'?: string[],
+  message?: string,
+  tag?: string[],
 }
 
 interface IDeploymentConfig extends IFlags, ILiaraJSON {
@@ -112,6 +115,8 @@ export default class Deploy extends Command {
     'detach': flags.boolean({description: 'do not stream app logs after deployment', default: false}),
     args: flags.string({description: 'docker image entrypoint args', multiple: true}),
     'build-arg': flags.string({description: 'docker image build args', multiple: true}),
+    message: flags.string({char: 'm', description: 'the release message'}),
+    tag: flags.string({char: 't', description: 'add a tag to the release', multiple: true}),
   }
 
   spinner!: ora.Ora
@@ -122,8 +127,6 @@ export default class Deploy extends Command {
     const debug = createDebugLogger(flags.debug)
     this.debug = debug
     this.spinner = ora()
-
-    this.debug()
 
     if (!config.image) {
       try {
@@ -225,6 +228,8 @@ Sorry for inconvenience. If you think it's a bug, please contact us.`)
       port: config.port,
       type: config.platform,
       mountPoint: config.volume,
+      message: config.message,
+      tags: config.tag,
     }
 
     if (config.image) {
@@ -235,6 +240,8 @@ Sorry for inconvenience. If you think it's a bug, please contact us.`)
     if (config['build-arg']) {
       body.build.args = config['build-arg']
     }
+
+    body.gitInfo = collectGitInfo(config.path, this.debug)
 
     // @ts-ignore
     body.platformConfig = config[config.platform]
