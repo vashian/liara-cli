@@ -52,6 +52,7 @@ interface ILiaraJSON {
   args?: string[],
   'build-arg'?: string[],
   cron?: string[],
+  disks?: string[],
   laravel?: ILaravelPlatformConfig,
   node?: INodePlatformConfig,
   healthCheck?: IHealthConfig,
@@ -227,6 +228,7 @@ Sorry for inconvenience. If you think it's a bug, please contact us.`)
       type: config.platform,
       mountPoint: config.volume,
       message: config.message,
+      disks: config.disks,
     }
 
     if (config.image) {
@@ -379,10 +381,14 @@ Please open up https://console.liara.ir/apps and unfreeze the app.`)
             }
 
             if (release.state === 'TIMEDOUT') {
+              // TODO: Test me.
+              this.spinner.fail();
               return reject(new Error('TIMEOUT'))
             }
 
             if (release.state === 'FAILED') {
+              // TODO: Test me.
+              this.spinner.fail();
               return reject(new Error('Release failed.'))
             }
 
@@ -423,14 +429,22 @@ Please open up https://console.liara.ir/apps and unfreeze the app.`)
   async showReleaseLogs(releaseID: string) {
     this.spinner.start('Creating a new release...')
 
-    return new Promise(resolve => {
+    return new Promise((resolve, reject) => {
       const poller = new Poller()
 
       poller.onPoll(async () => {
         try {
           const {data: {release}} = await axios.get<{
-            release: {state: string, status: string}
+            release: {state: string, status: string, failReason?: string}
           }>(`/v1/releases/${releaseID}`, this.axiosConfig)
+
+          if (release.state === 'FAILED') {
+            this.spinner.fail();
+            if(release.failReason) {
+              return reject(new DeployException(release.failReason))
+            }
+            return reject(new Error('Release failed.'))
+          }
 
           if (release.state === 'READY') {
             this.spinner.succeed('Release created.')
