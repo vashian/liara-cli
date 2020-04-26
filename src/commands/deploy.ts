@@ -44,6 +44,11 @@ interface IHealthConfig {
   startPeriod?: number,
 }
 
+interface IDisk {
+  name: String,
+  mountTo: String,
+}
+
 interface ILiaraJSON {
   app?: string,
   platform?: string,
@@ -52,7 +57,7 @@ interface ILiaraJSON {
   args?: string[],
   'build-arg'?: string[],
   cron?: string[],
-  disks?: string[],
+  disks?: IDisk[],
   laravel?: ILaravelPlatformConfig,
   node?: INodePlatformConfig,
   healthCheck?: IHealthConfig,
@@ -171,6 +176,18 @@ export default class Deploy extends Command {
       ? this.logKeyValue('Detected platform', config.platform)
       : this.logKeyValue('Platform', config.platform)
     this.logKeyValue('Port', String(config.port))
+
+    if(config.volume) {
+      this.logKeyValue('Volume', config.volume)
+      console.log(`${chalk.yellowBright('[warn]')} "volume" field is deprecated. Please use "disks" instead: https://docs.liara.ir/apps/disks`)
+    }
+
+    if(config.disks) {
+      this.logKeyValue('Disks')
+      for(const disk of config.disks) {
+        console.log(`  ${disk.name} ${chalk.blue('->')} ${disk.mountTo}`)
+      }
+    }
 
     try {
       const response = await this.deploy(config)
@@ -469,12 +486,17 @@ Please open up https://console.liara.ir/apps and unfreeze the app.`)
     }
   }
 
-  logKeyValue(key: string, value: string): void {
+  logKeyValue(key: string, value: string = ''): void {
     this.spinner.clear().frame()
-    this.log(`${chalk.gray(`${key}:`)} ${value}`)
+    this.log(`${chalk.blue(`${key}:`)} ${value}`)
   }
 
   validateDeploymentConfig(config: IDeploymentConfig) {
+    if(config.volume && config.disks) {
+      this.error("You can't use `volume` and `disks` fields at the same time.\
+ Please consider using only one of them.");
+    }
+
     if (config.volume && !path.isAbsolute(config.volume)) {
       this.error('Volume path must be absolute.')
     }
