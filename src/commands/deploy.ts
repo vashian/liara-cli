@@ -89,8 +89,12 @@ interface IGetProjectsResponse {
   projects: IProject[]
 }
 
+interface IRelease {
+  state: string, status: string, failReason?: string
+}
+
 interface IBuildLogsResponse {
-  release: { state: string },
+  release: IRelease,
   buildOutput: IBuildOutput[],
 }
 
@@ -399,14 +403,15 @@ Please open up https://console.liara.ir/apps and unfreeze the app.`)
             }
 
             if (release.state === 'TIMEDOUT') {
-              // TODO: Test me.
               this.spinner.fail();
               return reject(new Error('TIMEOUT'))
             }
 
             if (release.state === 'FAILED') {
-              // TODO: Test me.
               this.spinner.fail();
+              if(release.failReason) {
+                return reject(new DeployException(this.parseFailReason(release.failReason)))
+              }
               return reject(new Error('Release failed.'))
             }
 
@@ -452,14 +457,12 @@ Please open up https://console.liara.ir/apps and unfreeze the app.`)
 
       poller.onPoll(async () => {
         try {
-          const {data: {release}} = await axios.get<{
-            release: {state: string, status: string, failReason?: string}
-          }>(`/v1/releases/${releaseID}`, this.axiosConfig)
+          const {data: {release}} = await axios.get<{release: IRelease}>(`/v1/releases/${releaseID}`, this.axiosConfig)
 
           if (release.state === 'FAILED') {
             this.spinner.fail();
             if(release.failReason) {
-              return reject(new DeployException(release.failReason))
+              return reject(new DeployException(this.parseFailReason(release.failReason)))
             }
             return reject(new Error('Release failed.'))
           }
@@ -478,6 +481,16 @@ Please open up https://console.liara.ir/apps and unfreeze the app.`)
 
       poller.poll()
     })
+  }
+
+  parseFailReason(reason: string) {
+    const [errorName, ...data] = reason.split(' ');
+
+    if(errorName === 'disk_not_found') {
+      return `Could not find disk \`${data[0]}\`.`;
+    }
+
+    return reason;
   }
 
   dontDeployEmptyProjects(projectPath: string) {
