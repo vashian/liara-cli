@@ -4,7 +4,7 @@ import Command, {flags} from '@oclif/command'
 import updateNotifier from 'update-notifier'
 
 import './interceptors'
-import {API_BASE_URL, GLOBAL_CONF_PATH} from './constants'
+import {GLOBAL_CONF_PATH, DEFAULT_REGION} from './constants'
 
 updateNotifier({pkg: require('../package.json')}).notify()
 
@@ -14,6 +14,7 @@ export interface IGlobalLiaraConfig {
 
 export interface IConfig {
   'api-token'?: string,
+  'region'?: string,
 }
 
 export default abstract class extends Command {
@@ -22,13 +23,13 @@ export default abstract class extends Command {
     dev: flags.boolean({description: 'run in dev mode', hidden: true}),
     debug: flags.boolean({char: 'd', description: 'show debug logs'}),
     'api-token': flags.string({description: 'your api token to use for authentication'}),
+    region: flags.string({description: 'the region of Liara that you want to deploy your app on it', options:['Iran', 'Germany']}),
   }
 
   axiosConfig: AxiosRequestConfig = {
     ...axios.defaults,
-    baseURL: API_BASE_URL,
   }
-
+  
   readGlobalConfig(): IGlobalLiaraConfig {
     let content
 
@@ -57,11 +58,16 @@ Please check your network connection.`)
     this.error(error.message)
   }
 
-  setAxiosToken(config: IConfig): void {
+  setAxiosConfig(config: IConfig): void {
     if (!config['api-token']) {
       return
     }
-
     this.axiosConfig.headers.Authorization = `Bearer ${config['api-token']}`
+
+    if (!config['region']) {
+      this.axiosConfig.baseURL = DEFAULT_REGION
+      return
+    }
+    this.axiosConfig.baseURL = config['region']
   }
 }

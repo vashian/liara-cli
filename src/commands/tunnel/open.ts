@@ -45,7 +45,7 @@ export default class TunnelOpen extends Command {
     const {flags} = this.parse(TunnelOpen)
     this.spinner = ora()
 
-    this.setAxiosToken({
+    this.setAxiosConfig({
       ...this.readGlobalConfig(),
       ...flags,
     })
