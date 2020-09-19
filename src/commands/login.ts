@@ -41,8 +41,9 @@ export default class Login extends Command {
 
       region = selectedRegion === "Iran" ? REGIONS_API_URL.Iran : REGIONS_API_URL.Germany
       this.axiosConfig.baseURL = region
+    } else {
+      region = flags.region === "Iran" ? REGIONS_API_URL.Iran : REGIONS_API_URL.Germany
     }
-    region === "Iran" ? REGIONS_API_URL.Iran : REGIONS_API_URL.Germany
 
     if (!flags.email) {
       let emailIsValid = false
