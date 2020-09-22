@@ -24,26 +24,27 @@ export default class Login extends Command {
   async run() {
     const {flags} = this.parse(Login)
     const debug = createDebugLogger(flags.debug)
-    let region;
+    let region = flags.region;
 
     const body = {email: flags.email, password: flags.password}
 
-    if (!flags.region) {
+    if (!region) {
       const {selectedRegion} = await prompt({
         name: 'selectedRegion',
         type: 'list',
         message: 'Please select a region:',
         choices: [
-          "Iran",
-          "Germany",
+          "iran",
+          "germany",
         ]
       }) as {selectedRegion: string}
 
-      region = selectedRegion === "Iran" ? REGIONS_API_URL.Iran : REGIONS_API_URL.Germany
-      this.axiosConfig.baseURL = region
+      region = selectedRegion
     } else {
-      region = flags.region === "Iran" ? REGIONS_API_URL.Iran : REGIONS_API_URL.Germany
+      this.log(`You're logging into "${region}" region:`);
     }
+
+    this.axiosConfig.baseURL = REGIONS_API_URL[region]
 
     if (!flags.email) {
       let emailIsValid = false

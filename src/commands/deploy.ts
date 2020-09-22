@@ -71,6 +71,7 @@ interface IFlags {
   volume?: string,
   image?: string,
   'api-token'?: string,
+  'region'?: string,
   'detach': boolean,
   args?: string[],
   'build-arg'?: string[],
@@ -208,11 +209,13 @@ export default class Deploy extends Command {
       this.log(chalk.white('Open up the url below in your browser:'))
       this.log()
 
-      const liaraSubDomain: string = this.axiosConfig.baseURL === REGIONS_API_URL.Iran ? ".iran.liara.run" : ".liara.run"
-      DEV_MODE
+      const defaultSubdomain: string = config.region === 'iran' ? ".iran.liara.run" : ".liara.run"
+      const urlLogMessage = DEV_MODE
         // tslint:disable-next-line: no-http-string
-        ? this.log(`    ${chalk.cyan(`http://${config.app}.liara.localhost`)}`)
-        : this.log(`    ${chalk.cyan(`https://${config.app}${liaraSubDomain}`)}`)
+        ? `    ${chalk.cyan(`http://${config.app}.liara.localhost`)}`
+        : `    ${chalk.cyan(`https://${config.app}${defaultSubdomain}`)}`
+      this.log(urlLogMessage)
+
       this.log()
 
       if (!flags['detach']) {
@@ -221,6 +224,7 @@ export default class Deploy extends Command {
           '--app', config.app,
           '--since', moment().unix().toString(),
           '--api-token', flags["api-token"] || '',
+          '--region', flags['region'] || '',
         ])
       }
 
