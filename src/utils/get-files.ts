@@ -12,6 +12,7 @@ const defaultIgnores: string[] = [
   '.git',
   '.idea',
   '.vscode',
+  '.next',
   '.gitignore',
   '.liaraignore',
   '.dockerignore',
